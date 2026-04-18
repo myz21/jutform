@@ -354,5 +354,120 @@ if ($path === '/api/admin/logs' && $method === 'GET') {
     ]);
 }
 
+// JF-105: Queue worker that leaves old jobs stuck.
+if ($path === '/api/queue/enqueue' && $method === 'POST') {
+    $body = read_json_body();
+    $jobs = load_queue();
+    $maxAttempts = (int)($body['max_attempts'] ?? 3);
+    if ($maxAttempts < 1) {
+        $maxAttempts = 1;
+    }
+    if ($maxAttempts > 10) {
+        $maxAttempts = 10;
+    }
+
+    $jobs[] = [
+        'id' => uniqid('job_', true),
+        'type' => $body['type'] ?? 'email',
+        'created_at' => time(),
+        'status' => 'queued',
+        'attempts' => 0,
+        'max_attempts' => $maxAttempts,
+        'next_retry_at' => 0,
+        'last_error' => null,
+        'force_fail' => (bool)($body['force_fail'] ?? false),
+    ];
+    save_queue($jobs);
+    respond_json(202, ['queued' => count($jobs)]);
+}
+
+if ($path === '/api/queue/process' && $method === 'POST') {
+    $jobs = load_queue();
+    if (!$jobs) {
+        respond_json(200, ['processed' => 0, 'remaining' => 0, 'failed' => 0]);
+    }
+
+    $now = time();
+    $jobIndex = null;
+
+    // FIFO fairness: process the oldest eligible job first.
+    foreach ($jobs as $idx => $job) {
+        $status = (string)($job['status'] ?? 'queued');
+        $nextRetryAt = (int)($job['next_retry_at'] ?? 0);
+
+        if (($status === 'queued' || $status === 'retry') && $nextRetryAt <= $now) {
+            $jobIndex = $idx;
+            break;
+        }
+    }
+
+    if ($jobIndex === null) {
+        $failedCount = count(array_filter($jobs, function ($job) {
+            return (string)($job['status'] ?? '') === 'failed';
+        }));
+        respond_json(200, [
+            'processed' => 0,
+            'remaining' => count($jobs),
+            'failed' => $failedCount,
+            'note' => 'no eligible job to process',
+        ]);
+    }
+
+    $job = $jobs[$jobIndex];
+    $job['status'] = 'processing';
+    $job['started_at'] = $now;
+
+    $type = (string)($job['type'] ?? 'email');
+    $shouldFail = (bool)($job['force_fail'] ?? false) || strpos($type, 'fail') !== false;
+
+    if ($shouldFail) {
+        $job['attempts'] = (int)($job['attempts'] ?? 0) + 1;
+        $job['last_error'] = 'Simulated worker failure';
+
+        $maxAttempts = (int)($job['max_attempts'] ?? 3);
+        if ($job['attempts'] >= $maxAttempts) {
+            $job['status'] = 'failed';
+            $job['failed_at'] = $now;
+            $job['next_retry_at'] = 0;
+        } else {
+            $job['status'] = 'retry';
+            $job['next_retry_at'] = $now + min(30, 2 ** $job['attempts']);
+        }
+
+        $jobs[$jobIndex] = $job;
+        save_queue($jobs);
+
+        $failedCount = count(array_filter($jobs, function ($queuedJob) {
+            return (string)($queuedJob['status'] ?? '') === 'failed';
+        }));
+
+        respond_json(200, [
+            'processed' => 0,
+            'remaining' => count($jobs),
+            'failed' => $failedCount,
+            'retried' => $job['status'] === 'retry',
+            'job_id' => $job['id'],
+            'attempts' => $job['attempts'],
+            'note' => 'worker completed with retry/failure',
+        ]);
+    }
+
+    unset($jobs[$jobIndex]);
+    $jobs = array_values($jobs);
+    save_queue($jobs);
+
+    $failedCount = count(array_filter($jobs, function ($queuedJob) {
+        return (string)($queuedJob['status'] ?? '') === 'failed';
+    }));
+
+    respond_json(200, [
+        'processed' => 1,
+        'remaining' => count($jobs),
+        'failed' => $failedCount,
+        'job_id' => $job['id'],
+        'note' => 'worker completed',
+    ]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
