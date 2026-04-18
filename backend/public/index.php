@@ -469,5 +469,27 @@ if ($path === '/api/queue/process' && $method === 'POST') {
     ]);
 }
 
+// JF-106: Broken CSV export escaping.
+if ($path === '/api/export/csv' && $method === 'GET') {
+    header('Content-Type: text/csv; charset=UTF-8');
+    $rows = [
+        ['id' => 1, 'name' => 'Alice', 'note' => 'simple'],
+        ['id' => 2, 'name' => 'Bob', 'note' => 'value,with,commas'],
+        ['id' => 3, 'name' => 'Carol "The Great"', 'note' => "multi\nline"],
+    ];
+
+    $out = fopen('php://output', 'w');
+    if ($out === false) {
+        respond_json(500, ['ok' => false, 'error' => 'Failed to open output stream']);
+    }
+
+    fputcsv($out, ['id', 'name', 'note']);
+    foreach ($rows as $row) {
+        fputcsv($out, [$row['id'], $row['name'], $row['note']]);
+    }
+    fclose($out);
+    exit;
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
