@@ -586,5 +586,68 @@ if ($path === '/api/admin/action' && $method === 'POST') {
     ]);
 }
 
+// JF-110: Hard delete, no restore window.
+if ($path === '/api/submissions/delete' && $method === 'POST') {
+    $body = read_json_body();
+    $id = $body['id'] ?? null;
+    if ($id === null || $id === '') {
+        respond_json(422, [
+            'ok' => false,
+            'error' => 'id is required',
+        ]);
+    }
+
+    $trash = load_submission_trash();
+    $now = time();
+    $restoreUntil = $now + (30 * 24 * 60 * 60);
+    $trash[(string)$id] = [
+        'id' => $id,
+        'deleted_at' => $now,
+        'restore_until' => $restoreUntil,
+        'status' => 'deleted',
+    ];
+    save_submission_trash($trash);
+
+    respond_json(200, [
+        'deleted' => true,
+        'id' => $id,
+        'mode' => 'soft-delete',
+        'restore_until' => date(DATE_ATOM, $restoreUntil),
+    ]);
+}
+
+if ($path === '/api/submissions/restore' && $method === 'POST') {
+    $body = read_json_body();
+    $id = $body['id'] ?? null;
+    if ($id === null || $id === '') {
+        respond_json(422, [
+            'ok' => false,
+            'error' => 'id is required',
+        ]);
+    }
+
+    $trash = load_submission_trash();
+    $key = (string)$id;
+    if (!isset($trash[$key])) {
+        respond_json(404, ['ok' => false, 'error' => 'Submission is not deleted']);
+    }
+
+    $entry = $trash[$key];
+    if ((int)($entry['restore_until'] ?? 0) < time()) {
+        unset($trash[$key]);
+        save_submission_trash($trash);
+        respond_json(410, ['ok' => false, 'error' => 'Restore window expired']);
+    }
+
+    unset($trash[$key]);
+    save_submission_trash($trash);
+
+    respond_json(200, [
+        'restored' => true,
+        'id' => $id,
+        'mode' => 'restore',
+    ]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
