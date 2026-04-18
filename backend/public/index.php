@@ -293,5 +293,66 @@ if ($path === '/api/submissions/search' && $method === 'GET') {
     respond_json(200, ['items' => $result]);
 }
 
+// JF-104: Log filters ignored, no total metadata.
+if ($path === '/api/admin/logs' && $method === 'GET') {
+    $logs = [
+        ['id' => 1, 'event' => 'login', 'created_at' => '2026-04-01 10:00:00'],
+        ['id' => 2, 'event' => 'submit', 'created_at' => '2026-04-02 11:00:00'],
+        ['id' => 3, 'event' => 'email_sent', 'created_at' => '2026-04-03 12:00:00'],
+        ['id' => 4, 'event' => 'submit', 'created_at' => '2026-04-15 09:30:00'],
+        ['id' => 5, 'event' => 'submit', 'created_at' => '2026-04-28 17:10:00'],
+    ];
+
+    $event = trim((string)($_GET['event'] ?? ''));
+    $dateFrom = trim((string)($_GET['date_from'] ?? ''));
+    $dateTo = trim((string)($_GET['date_to'] ?? ''));
+    $page = (int)($_GET['page'] ?? 1);
+    $perPage = (int)($_GET['per_page'] ?? 20);
+
+    if ($page < 1) {
+        $page = 1;
+    }
+    if ($perPage < 1) {
+        $perPage = 1;
+    }
+    if ($perPage > 100) {
+        $perPage = 100;
+    }
+
+    $fromTs = $dateFrom !== '' ? strtotime($dateFrom . ' 00:00:00') : null;
+    $toTs = $dateTo !== '' ? strtotime($dateTo . ' 23:59:59') : null;
+
+    $filtered = array_values(array_filter($logs, function ($row) use ($event, $fromTs, $toTs) {
+        if ($event !== '' && (string)$row['event'] !== $event) {
+            return false;
+        }
+
+        $rowTs = strtotime((string)$row['created_at']);
+        if ($fromTs !== null && $rowTs < $fromTs) {
+            return false;
+        }
+        if ($toTs !== null && $rowTs > $toTs) {
+            return false;
+        }
+
+        return true;
+    }));
+
+    usort($filtered, function ($a, $b) {
+        return strcmp((string)$b['created_at'], (string)$a['created_at']);
+    });
+
+    $total = count($filtered);
+    $offset = ($page - 1) * $perPage;
+    $items = array_slice($filtered, $offset, $perPage);
+
+    respond_json(200, [
+        'items' => $items,
+        'total' => $total,
+        'page' => $page,
+        'per_page' => $perPage,
+    ]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
