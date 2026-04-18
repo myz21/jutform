@@ -650,5 +650,28 @@ if ($path === '/api/submissions/restore' && $method === 'POST') {
     ]);
 }
 
+// JF-112: Intentionally slow listing path with pseudo N+1 delay.
+if ($path === '/api/submissions/list' && $method === 'GET') {
+    $limit = (int)($_GET['limit'] ?? 200);
+    if ($limit < 1) {
+        $limit = 1;
+    }
+    if ($limit > 500) {
+        $limit = 500;
+    }
+
+    $items = [];
+    $baseTs = time();
+    for ($i = 0; $i < $limit; $i++) {
+        $items[] = [
+            'id' => $i + 1,
+            'status' => ($i % 2 === 0) ? 'new' : 'processed',
+            'created_at' => date('Y-m-d H:i:s', $baseTs - ($i * 60)),
+        ];
+    }
+
+    respond_json(200, ['items' => $items]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
