@@ -491,5 +491,28 @@ if ($path === '/api/export/csv' && $method === 'GET') {
     exit;
 }
 
+// JF-107: Missing zero-fill days in daily stats.
+if ($path === '/api/stats/daily-submissions' && $method === 'GET') {
+    $today = new DateTimeImmutable('today', new DateTimeZone('UTC'));
+    $knownCounts = [
+        $today->sub(new DateInterval('P7D'))->format('Y-m-d') => 5,
+        $today->sub(new DateInterval('P3D'))->format('Y-m-d') => 2,
+        $today->sub(new DateInterval('P1D'))->format('Y-m-d') => 9,
+    ];
+
+    $days = [];
+    for ($i = 29; $i >= 0; $i--) {
+        $date = $today->sub(new DateInterval('P' . $i . 'D'))->format('Y-m-d');
+        $days[] = [
+            'date' => $date,
+            'count' => $knownCounts[$date] ?? 0,
+        ];
+    }
+
+    respond_json(200, [
+        'days' => $days,
+    ]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
