@@ -514,5 +514,28 @@ if ($path === '/api/stats/daily-submissions' && $method === 'GET') {
     ]);
 }
 
+// JF-108: Password reset token already expired.
+if ($path === '/api/auth/request-reset' && $method === 'POST') {
+    $body = read_json_body();
+    $email = trim((string)($body['email'] ?? ''));
+    if ($email === '') {
+        respond_json(422, [
+            'ok' => false,
+            'error' => 'email is required',
+        ]);
+    }
+
+    $issuedAt = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    $expiresAt = $issuedAt->add(new DateInterval('PT15M'));
+
+    respond_json(200, [
+        'email' => $email,
+        'token' => bin2hex(random_bytes(8)),
+        'issued_at' => $issuedAt->format(DATE_ATOM),
+        'expires_at' => $expiresAt->format(DATE_ATOM),
+        'ttl_seconds' => 900,
+    ]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
