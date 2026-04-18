@@ -537,5 +537,54 @@ if ($path === '/api/auth/request-reset' && $method === 'POST') {
     ]);
 }
 
+// JF-109: No validation for admin action parameters.
+if ($path === '/api/admin/action' && $method === 'POST') {
+    $body = read_json_body();
+
+    $allowedQueryKeys = [];
+    $unknownQueryKeys = array_values(array_diff(array_keys($_GET), $allowedQueryKeys));
+    if ($unknownQueryKeys) {
+        respond_json(422, [
+            'ok' => false,
+            'error' => 'Unexpected query parameters',
+            'fields' => $unknownQueryKeys,
+        ]);
+    }
+
+    $allowedBodyKeys = ['action', 'target_id', 'reason'];
+    $unknownBodyKeys = array_values(array_diff(array_keys($body), $allowedBodyKeys));
+    if ($unknownBodyKeys) {
+        respond_json(422, [
+            'ok' => false,
+            'error' => 'Unexpected body parameters',
+            'fields' => $unknownBodyKeys,
+        ]);
+    }
+
+    $action = trim((string)($body['action'] ?? ''));
+    if ($action === '') {
+        respond_json(422, [
+            'ok' => false,
+            'error' => 'action is required',
+        ]);
+    }
+
+    $allowedActions = ['reindex_logs', 'replay_email', 'archive_submission'];
+    if (!in_array($action, $allowedActions, true)) {
+        respond_json(422, [
+            'ok' => false,
+            'error' => 'Invalid action',
+            'allowed_actions' => $allowedActions,
+        ]);
+    }
+
+    respond_json(200, [
+        'performed' => true,
+        'action' => $action,
+        'target_id' => $body['target_id'] ?? null,
+        'reason' => $body['reason'] ?? null,
+    ]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
