@@ -117,6 +117,7 @@ if ($path === '/api/forms/submit' && $method === 'POST') {
     try {
         $pdo = get_db();
 
+        // JF-111: invalid request must not return HTTP 200.
         if (empty($body['form_id']) || empty($body['email'])) {
             respond_json(422, [
                 'ok' => false,
