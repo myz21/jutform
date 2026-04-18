@@ -257,5 +257,41 @@ if ($path === '/api/health') {
     exit;
 }
 
+// JF-103: Locale-unsafe search and sort for Turkish names.
+if ($path === '/api/submissions/search' && $method === 'GET') {
+    $q = $_GET['q'] ?? '';
+    $rows = [
+        ['id' => 1, 'name' => 'Ipek'],
+        ['id' => 2, 'name' => 'ipek'],
+        ['id' => 3, 'name' => 'İpek'],
+        ['id' => 4, 'name' => 'Ismail'],
+        ['id' => 5, 'name' => 'İsmail'],
+    ];
+
+    $normalizedQuery = normalize_search_text((string)$q);
+
+    $result = array_values(array_filter($rows, function ($row) use ($normalizedQuery) {
+        $normalizedName = normalize_search_text((string)$row['name']);
+        return strpos($normalizedName, $normalizedQuery) !== false;
+    }));
+
+    if (class_exists('Collator')) {
+        $collator = new Collator('tr_TR');
+        $collator->setStrength(Collator::PRIMARY);
+        usort($result, function ($a, $b) use ($collator) {
+            return $collator->compare((string)$a['name'], (string)$b['name']);
+        });
+    } else {
+        usort($result, function ($a, $b) {
+            return strcmp(
+                normalize_search_text((string)$a['name']),
+                normalize_search_text((string)$b['name'])
+            );
+        });
+    }
+
+    respond_json(200, ['items' => $result]);
+}
+
 http_response_code(404);
 echo json_encode(['error' => 'Not found. Try /api/health']) . "\n";
